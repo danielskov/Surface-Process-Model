@@ -1,0 +1,43 @@
+CC=gcc-5
+#CFLAGS=-Wall -O2 -lm -g -ffast-math
+#LDFLAGS=-lm
+#CFLAGS=-lm -g
+#LDFLAGS=-lm
+#CFLAGSDBG=-lm -g -pg -fopenmp
+CFLAGS=-Wall -O2 -fopenmp -g -lm -funroll-loops -ffast-math #To be usd when running with openmp
+#CFLAGS=-Wall -O2 -g -lm -funroll-loops -ffast-math #To be used when running without openmp
+LDFLAGS=-lm -fopenmp #To be used when running with openmp
+#LDFLAGS=-lm #To be used when running without openmp
+SRC=main.c functions.c inout.c landslides.c explicit_solver.c sediment_transport.c  flexflex.c integral_flexure.c noheight_change.c transient_changes.c diff_change.c courant_crit.c channel_width_calc.c sedcap_calculator.c stream_power_erosion.c pelletier_sediment_erosion.c saltation_abrasion.c nonlinear_diffusion.c linear_diffusion.c
+OBJ=$(SRC:.c=.o)
+BIN=jb
+DEPS=header.h
+
+$(BIN): $(OBJ)
+	$(CC) $(LDFLAGS) $^ -o $@
+
+%.o:	%.c $(DEPS)
+	$(CC) -c -o $@ $< $(CFLAGS)
+	
+debug:
+	debug: $(BIN)-debug
+	
+grendel: $(SRC)
+	$(CCGRENDEL) $(CFLAGSGRENDEL) $< -o $(BIN) -lm
+
+plot_kei.png: plot_kei.txt kei.txt
+		pyxplot $<
+
+
+clean:
+	$(RM) $(BIN) $(OBJ)
+	#
+# clear:
+# 	$(RM) -r output
+# 	mkdir -p output
+# 	@#$(RM) output/*
+
+clean_folder:
+	$(RM) -r output
+	mkdir -p output
+	@#$(RM) output/*

@@ -1,0 +1,1304 @@
+/*Functions to be used in model*/
+#include "header.h"
+
+long f;
+
+long find_baselevelnodes(nodetype *nodes,long nx,long ny)
+//Function that finds the baselevel nodes as all nodes that have an initial height of 0, and assigns them with a catchment number c, a reciever number to themselves and a binary indicator b to show they are a baselevel node. 
+{
+  long i;
+  long j=0;
+	
+#pragma omp parallel for default(none) private(i) shared(nodes,nx,ny) reduction(+: j) if((nx*ny)>(100*100))
+  for (i=0;i<nx*ny;i++)
+    {
+      if (nodes[i].bed==0) {nodes[i].c=i; nodes[i].r=i; nodes[i].b=1; j++; /*printf("Baselevel %ld \n",i);*/}
+      else if(nodes[i].bed>0) {nodes[i].b=0;}
+      else {printf("Problems in find_baselevelnodes function \n"); exit(1);}
+    }
+	
+  return j;
+}
+
+void baselevel_lister(nodetype *nodes,long *baselevel_list,long n_baselevelnodes,long nx,long ny)
+{
+  long i;
+  int j=0;
+  for (i=0;i<nx*ny;i++)
+    {
+      if (nodes[i].b==1) {
+	baselevel_list[j]=i;
+	j++;
+      }
+    }
+}
+
+void xy(nodetype *nodes,long nx,long ny)
+{
+  long i,j;
+	
+#pragma omp parallel for default(none) private(i,j) shared(nodes,nx,ny) if((nx*ny)>(100*100))
+  for (i=0;i<ny;i++)
+    {
+      for (j=0;j<nx;j++)
+	{
+	  nodes[i*nx+j].x=j;
+	  nodes[i*nx+j].y=i;
+	}
+    }
+  //for (i=0;i<nx*ny;i++) {if (i%nx==0 && i!=0) printf("\n"); printf("%ld,%ld  ",nodes[i].x,nodes[i].y);}
+  //printf("\n");
+  //for (i=0;i<nx*ny;i++) {if (i%nx==0 && i!=0) printf("\n"); printf("%4.2f  ",nodes[i].bed);}	 
+	
+}
+
+void get_neighbours(nodetype *nodes,long nx,long ny)
+{
+  long i,j;
+  char periodic='n'; //To make the boundaries (except the baselevel boundary) periodic, this parameter should be set to y. If not, the boundaries are reflecting 
+	
+	
+#pragma omp parallel for default(none) private(i,j) shared(nodes,nx,ny,periodic) if((nx*ny)>(100*100))
+  for (i=0;i<ny;i++) { for(j=0;j<nx;j++)
+      {	
+	nodes[i*nx+j].id=i*nx+j;
+	if (i!=0 && i!=(ny-1) && j!=0 && j!=(nx-1)) //Her finder vi midten
+	  {
+	    nodes[i*nx+j].n_neigh=9; //As it is in the middle
+	    nodes[i*nx+j].neigh[0]=(i*nx+j-1); //Til venstre
+	    nodes[i*nx+j].neigh[1]=(i*nx+j); //Selv
+	    nodes[i*nx+j].neigh[2]=(i*nx+j+1); //Til højre
+	    nodes[i*nx+j].neigh[3]=((i+1)*nx+j-1); //Ned til venstre
+	    nodes[i*nx+j].neigh[4]=((i+1)*nx+j); //ned
+	    nodes[i*nx+j].neigh[5]=((i+1)*nx+j+1); //ned til højre
+	    nodes[i*nx+j].neigh[6]=((i-1)*nx+j-1); //Op til venstre
+	    nodes[i*nx+j].neigh[7]=((i-1)*nx+j); //Op
+	    nodes[i*nx+j].neigh[8]=((i-1)*nx+j+1); //Op til højre
+	  }
+	else if (i==0) //Toppen
+	  {
+	    if (j!=0 && j!=nx-1) //Midten af toppen
+	      {
+		nodes[i*nx+j].n_neigh=6; //As it is on the top
+		nodes[i*nx+j].neigh[0]=(i*nx+j-1); //Til venstre
+		nodes[i*nx+j].neigh[1]=(i*nx+j); //Selv
+		nodes[i*nx+j].neigh[2]=(i*nx+j+1); //Til højre
+		nodes[i*nx+j].neigh[3]=((i+1)*nx+j-1); //Ned til venstre
+		nodes[i*nx+j].neigh[4]=((i+1)*nx+j); //ned
+		nodes[i*nx+j].neigh[5]=((i+1)*nx+j+1); //ned til højre
+	      }
+	    else if (j==0) //Øverste venstre hjørne
+	      {
+		nodes[i*nx+j].n_neigh=4; //As it is in the top left corner
+		nodes[i*nx+j].neigh[0]=(i*nx+j); //Node selv
+		nodes[i*nx+j].neigh[1]=((i+1)*nx+j); //ned
+		nodes[i*nx+j].neigh[2]=(i*nx+j+1); //til højre
+		nodes[i*nx+j].neigh[3]=((i+1)*nx+j+1); //Ned til højre
+		//If we want a periodic boundary, these last 2 should be included
+		switch (periodic)
+		  {
+		  case 'y':
+		    nodes[i*nx+j].n_neigh=6;
+		    nodes[i*nx+j].neigh[4]=(i*nx+nx-1); //til venstre
+		    nodes[i*nx+j].neigh[5]=((i+1)*nx+nx-1); //Ned til venstre
+		    break;
+		  }
+	      }
+	    else if (j==(nx-1)) //Øverste højre hjørne
+	      {
+		nodes[i*nx+j].n_neigh=4; //As it is in the top right corner
+		nodes[i*nx+j].neigh[0]=(i*nx+j); //node selv
+		nodes[i*nx+j].neigh[1]=((i+1)*nx+j); //Ned
+		nodes[i*nx+j].neigh[2]=(i*nx+j-1); //Til venstre
+		nodes[i*nx+j].neigh[3]=((i+1)*nx+j-1); //Ned til Venstre
+					
+		switch (periodic)
+		  {
+		  case 'y':
+		    //If we want a periodic boundary, these last 2 should be included
+		    nodes[i*nx+j].n_neigh=6;
+		    nodes[i*nx+j].neigh[4]=(i*nx); //til højre
+		    nodes[i*nx+j].neigh[5]=((i+1)*nx); //Ned til højre
+		    break;
+		  }
+	      }
+	  }
+	else if (i==(ny-1)) //Bunden
+	  {
+	    if (j!=0 && j!=nx-1) //Midten af bunden
+	      {
+		nodes[i*nx+j].n_neigh=6; //As it is the bottom
+		nodes[i*nx+j].neigh[0]=(i*nx+j-1); //Til venstre
+		nodes[i*nx+j].neigh[1]=(i*nx+j); //node selv
+		nodes[i*nx+j].neigh[2]=(i*nx+j+1); //Til højre
+		nodes[i*nx+j].neigh[3]=((i-1)*nx+j-1); //Op til venstre
+		nodes[i*nx+j].neigh[4]=((i-1)*nx+j); //op
+		nodes[i*nx+j].neigh[5]=((i-1)*nx+j+1); //op til højre
+	      }
+	    else if (j==0) //Nederste venstre hjørne
+	      {
+		nodes[i*nx+j].n_neigh=4; //As it is in the bottom left
+		nodes[i*nx+j].neigh[0]=(i*nx+j); //node selv
+		nodes[i*nx+j].neigh[1]=((i-1)*nx+j); //Op
+		nodes[i*nx+j].neigh[2]=(i*nx+j+1); //Til højre
+		nodes[i*nx+j].neigh[3]=((i-1)*nx+j+1); //Op til højre
+		switch (periodic)
+		  {
+		  case 'y':
+		    //If we want a periodic boundary, these last 3 should be included
+		    nodes[i*nx+j].n_neigh=6;
+		    nodes[i*nx+j].neigh[4]=(i*nx+nx-1); //til venstre
+		    nodes[i*nx+j].neigh[5]=((i-1)*nx+nx-1); //Op til venstre
+		    break;
+		  }
+
+	      }
+	    else if (j==(nx-1)) //Nederste højre hjørne
+	      {
+		nodes[i*nx+j].n_neigh=4; //As it is in the bottom right
+		nodes[i*nx+j].neigh[0]=(i*nx+j); //Selv
+		nodes[i*nx+j].neigh[1]=((i-1)*nx+j); //Op
+		nodes[i*nx+j].neigh[2]=(i*nx+j-1); //Til venstre
+		nodes[i*nx+j].neigh[3]=((i-1)*nx+j-1); //Op til venstre
+		switch (periodic)
+		  {
+		  case 'y':
+		    //If we want a periodic boundary, these last 3 should be included
+		    nodes[i*nx+j].n_neigh=6;
+		    nodes[i*nx+j].neigh[4]=(i*nx); //til højre
+		    nodes[i*nx+j].neigh[5]=((i-1)*nx); //Op til højre
+		    break;
+		  }
+	      }
+	  }
+	else if (j==0) //Venstre side (hjørner er taget længere oppe)
+	  {
+	    nodes[i*nx+j].n_neigh=6; //As it is on the left edge
+	    nodes[i*nx+j].neigh[0]=((i-1)*nx+j); //Op
+	    nodes[i*nx+j].neigh[1]=(i*nx+j); //node selv
+	    nodes[i*nx+j].neigh[2]=((i+1)*nx+j); //Ned
+	    nodes[i*nx+j].neigh[3]=((i-1)*nx+j+1); //Op til højre
+	    nodes[i*nx+j].neigh[4]=(i*nx+j+1); //Til højre
+	    nodes[i*nx+j].neigh[5]=((i+1)*nx+j+1); //Ned til højre
+	    switch (periodic)
+	      {
+	      case 'y':
+		//If we want a periodic boundary, these last 3 should be included
+		nodes[i*nx+j].n_neigh=9;
+		nodes[i*nx+j].neigh[6]=((i-1)*nx+nx-1); //Op til Venstre
+		nodes[i*nx+j].neigh[7]=(i*nx+nx-1); //Til Venstre
+		nodes[i*nx+j].neigh[8]=((i+1)*nx+nx-1); //Ned til venstre
+		break;
+	      }
+	  }
+	else if (j==(nx-1)) //Højre side (hjørner taget længere oppe)
+	  {
+	    nodes[i*nx+j].n_neigh=6; //As it is on the right edge
+	    nodes[i*nx+j].neigh[0]=((i-1)*nx+j); //Op
+	    nodes[i*nx+j].neigh[1]=(i*nx+j); //node selv
+	    nodes[i*nx+j].neigh[2]=((i+1)*nx+j); //Ned
+	    nodes[i*nx+j].neigh[3]=((i-1)*nx+j-1); //Op til venstre
+	    nodes[i*nx+j].neigh[4]=(i*nx+j-1); //Til Venstre
+	    nodes[i*nx+j].neigh[5]=((i+1)*nx+j-1); //Ned til venstre
+	    switch (periodic)
+	      {
+	      case 'y':
+		//If we want a periodic boundary, these last 3 should be included
+		nodes[i*nx+j].n_neigh=9;
+		nodes[i*nx+j].neigh[6]=((i-1)*nx); //Op til Højre
+		nodes[i*nx+j].neigh[7]=(i*nx); //Til Højre
+		nodes[i*nx+j].neigh[8]=((i+1)*nx); //Ned til Højre
+		break;
+	      }
+	  }
+	else
+	  {
+	    printf("Error \n");
+	    exit(1);
+	  }
+      }
+  }
+	
+	
+  //Print the neighbours for all nodes out
+  //long h;
+  //for (i=0;i<ny*nx;i++) for (h=0;h<nodes[i].n_neigh;h++) printf("Node %ld, Neighboour %ld: %ld \n", i,h, nodes[i].neigh[h]);
+	
+}
+
+void get_distance(nodetype *nodes,long nx,long ny,double dx, double dy)
+{
+  long i,h;
+  /*Getting the distance to neighbouring nodes for all nodes */
+  long g;
+#pragma omp parallel for default(none) private(i,h,g) shared(nx,ny,nodes,dx,dy) if((nx*ny)>(100*100))
+  for (i=0;i<ny*nx;i++)
+    {
+      for (h=0;h<nodes[i].n_neigh;h++)
+	{
+	  g=nodes[i].neigh[h];
+	  if (nodes[i].x==nodes[g].x && nodes[i].y==nodes[g].y) //If the neighbour is the node itself
+	    {
+	      nodes[i].distance[h]=0; //This might be a problem, how do I handle nodes that have themselves as reciever?
+	    }
+	  else if (nodes[i].y==nodes[g].y) //If the neighbour is direct neighbour either up/down or right/left
+	    {
+	      nodes[i].distance[h]=dy;
+	    }
+	  else if (nodes[i].x==nodes[g].x) 
+	    {
+	      nodes[i].distance[h]=dx;
+	    }
+	  else //If neighbour is a diagonal neighbour
+	    {
+	      nodes[i].distance[h]=sqrt(pow(dx,2)+pow(dy,2));
+	    }
+	}
+    }
+	
+  //for (i=0;i<ny*nx;i++) for (h=0;h<nodes[i].n_neigh;h++) printf("Node %ld, Neighboour %ld: %ld distance: %2.3f \n", i,h, nodes[i].neigh[h],nodes[i].distance[h]);
+	
+}
+
+void get_slope(nodetype *nodes,long nx,long ny)
+{
+  long i,h;
+  long g;
+	 
+#pragma omp parallel for default(none) private(i,h,g) shared(nx,ny,nodes) //if((nx*ny)>(100*100))
+  for (i=0;i<ny*nx;i++)
+    {
+      for (h=0;h<nodes[i].n_neigh;h++)
+	{
+	  g=nodes[i].neigh[h];
+	  if ((i-g)==0)
+	    {
+	      nodes[i].slope[h]=0; //This might be a problem, how do I handle nodes that have themselves as reciever?
+	    }
+	  else
+	    {
+	      nodes[i].slope[h]=(nodes[nodes[i].neigh[h]].topsedi-nodes[i].topsedi)/(nodes[i].distance[h]); //We are getting positive slopes downslope, as this is used in the solution of the equation
+	      //	printf("slope: %2.2f \n, distance %2.2f \n", nodes[i*ny+j].slope[h],nodes[i*ny+j].distance[h]);
+	    }
+	}
+    }
+	
+  //Print the neighbours for all nodes out
+  //for (i=0;i<nx;i++) for (j=0;j<ny;j++) for (h=0;h<nodes[i*ny+j].n_neigh;h++) printf("Node %ld, Neighboour %ld: %ld, slope: %2.4f, own_bed: %2.8f, neigh_bed: %2.8f \n", i*ny+j,h, nodes[i*ny+j].neigh[h],nodes[i*ny+j].slope[h],nodes[i*ny+j].bed,nodes[nodes[i*ny+j].neigh[h]].bed);
+	
+}
+
+
+void get_slope_new_heights(nodetype *nodes,long nx,long ny)
+{
+  long i,h;
+  long g;
+	 
+#pragma omp parallel for default(none) private(i,h,g) shared(nx,ny,nodes) //if((nx*ny)>(100*100))
+  for (i=0;i<ny*nx;i++)
+    {
+      for (h=0;h<nodes[i].n_neigh;h++)
+	{
+	  g=nodes[i].neigh[h];
+	  if ((i-g)==0)
+	    {
+	      nodes[i].slope[h]=0; //This might be a problem, how do I handle nodes that have themselves as reciever?
+	    }
+	  else
+	    {
+	      nodes[i].slope[h]=(nodes[nodes[i].neigh[h]].topsedi_new-nodes[i].topsedi_new)/(nodes[i].distance[h]); //We are getting positive slopes downslope, as this is used in the solution of the equation
+	      //	printf("slope: %2.2f \n, distance %2.2f \n", nodes[i*ny+j].slope[h],nodes[i*ny+j].distance[h]);
+	    }
+	}
+    }
+	
+  //Print the neighbours for all nodes out
+  //for (i=0;i<nx;i++) for (j=0;j<ny;j++) for (h=0;h<nodes[i*ny+j].n_neigh;h++) printf("Node %ld, Neighboour %ld: %ld, slope: %2.4f, own_bed: %2.8f, neigh_bed: %2.8f \n", i*ny+j,h, nodes[i*ny+j].neigh[h],nodes[i*ny+j].slope[h],nodes[i*ny+j].bed,nodes[nodes[i*ny+j].neigh[h]].bed);
+	
+}
+
+void get_reciever(nodetype *nodes,long nx,long ny)
+{
+  long i,h;
+  double tmp;
+	
+#pragma omp parallel for default(none) private(i,h,tmp) shared(nx,ny,nodes) //if((nx*ny)>(100*100))
+  for (i=0;i<ny*nx;i++) /*Starting from 1, as the first row are baselevel rows, thus have themselves as reciever*/
+    {
+      tmp=1000000; //Large number
+      //nodes[i*ny+j].reciever_distance=10;
+      if (nodes[i].b!=1)
+	{
+	  for (h=0;h<nodes[i].n_neigh;h++)
+	    {
+	      if (nodes[i].slope[h]<=tmp)
+		{
+		  tmp=nodes[i].slope[h];
+		  nodes[i].r=nodes[i].neigh[h];
+		  nodes[i].reciever_distance=nodes[i].distance[h]; //Storing the distance to the reciever
+		  nodes[i].reciever_slope=nodes[i].slope[h];
+		}
+	    }
+	  if (nodes[i].topsedi<=nodes[nodes[i].r].topsedi) {nodes[i].r=i; nodes[i].reciever_distance=0; nodes[i].reciever_slope=0;}
+	}
+    }
+}
+
+void get_reciever_wo_slope(nodetype *nodes,long nx,long ny)
+{
+  long i,h;
+  double tmp;	
+  //#pragma omp parallel for default(none) private(i,h,tmp) shared(nx,ny,nodes) //if((nx*ny)>(100*100))
+  for (i=0;i<ny*nx;i++) /*Starting from 1, as the first row are baselevel rows, thus have themselves as reciever*/
+    {
+      tmp=INT_MAX; //Large number
+      //nodes[i*ny+j].reciever_distance=10;
+      if (nodes[i].b!=1)
+	{	
+	  for (h=0;h<nodes[i].n_neigh;h++)
+	    {	
+				
+	      if (((nodes[nodes[i].neigh[h]].topsedi-nodes[i].topsedi)/nodes[i].distance[h])<=tmp && nodes[i].neigh[h]!=i)
+		{
+		  tmp=(nodes[nodes[i].neigh[h]].topsedi-nodes[i].topsedi)/nodes[i].distance[h];
+		  nodes[i].r=nodes[i].neigh[h];
+		  nodes[i].reciever_distance=nodes[i].distance[h]; //Storing the distance to the reciever
+		  nodes[i].reciever_slope=(nodes[i].topsedi-nodes[nodes[i].neigh[h]].topsedi)/nodes[i].distance[h];
+
+		}
+
+	      /*if (nodes[i].drain_area>(200*200*80) && nodes[i].topsedi<100){
+		//printf("slope %g \n",(nodes[i].topsedi-nodes[nodes[i].neigh[h]].topsedi)/nodes[i].distance[h]);
+		printf("slope %g topsedi %g r_topsedi %g distance %g slope igen %g \n",nodes[i].reciever_slope,nodes[i].topsedi,nodes[nodes[i].r].topsedi,nodes[i].reciever_distance,(nodes[i].topsedi-nodes[nodes[i].r].topsedi)/nodes[i].reciever_distance);
+		}
+	      */
+	    }
+	  if (nodes[i].topsedi<=nodes[nodes[i].r].topsedi) {nodes[i].r=i; nodes[i].reciever_distance=0; nodes[i].reciever_slope=0;}
+	  /*
+	  if (nodes[i].drain_area>(200*200*80) && nodes[i].topsedi<100) {
+	    printf("Final slope %g \n",nodes[i].reciever_slope);
+	    printf("\n\n\n");}
+	    
+	    }
+	  */
+	}
+    }
+}
+
+void get_reciever_wo_slope_new(nodetype *nodes,long nx,long ny)
+{
+  long i,h;
+  double tmp;
+  for (i=0;i<nx*ny;i++) nodes[i].r=0;
+#pragma omp parallel for default(none) private(i,h,tmp) shared(nx,ny,nodes) //if((nx*ny)>(100*100))
+  for (i=0;i<ny*nx;i++) /*Starting from 1, as the first row are baselevel rows, thus have themselves as reciever*/
+    {
+      tmp=INT_MAX; //Large number
+      //nodes[i*ny+j].reciever_distance=10;
+      if (nodes[i].b!=1)
+	{
+	  for (h=0;h<nodes[i].n_neigh;h++)
+	    {
+	      if (nodes[nodes[i].neigh[h]].topsedi_new<=tmp)
+		{
+		  tmp=nodes[nodes[i].neigh[h]].topsedi_new;
+		  nodes[i].r=nodes[i].neigh[h];
+		  nodes[i].reciever_distance=nodes[i].distance[h]; //Storing the distance to the reciever
+		  nodes[i].reciever_slope=(nodes[i].topsedi_new-nodes[nodes[i].neigh[h]].topsedi_new)/nodes[i].distance[h];
+		}
+	    }
+	  if (nodes[i].topsedi_new<=nodes[nodes[i].r].topsedi_new) {nodes[i].r=i; nodes[i].reciever_distance=0; nodes[i].reciever_slope=0;}
+	}
+    }
+}
+
+void get_reciever_new_heights(nodetype *nodes,long nx,long ny)
+{
+  long i,h;
+  double tmp;
+	
+#pragma omp parallel for default(none) private(i,h,tmp) shared(nx,ny,nodes) //if((nx*ny)>(100*100))
+  for (i=0;i<ny*nx;i++) /*Starting from 1, as the first row are baselevel rows, thus have themselves as reciever*/
+    {
+      tmp=1000000; //Large number
+      //nodes[i*ny+j].reciever_distance=10;
+      if (nodes[i].b!=1)
+	{
+	  for (h=0;h<nodes[i].n_neigh;h++)
+	    {
+	      if (nodes[i].slope[h]<=tmp) //Her sørger jeg for at noden ikke kan have sig selv som reciever
+		{
+		  tmp=nodes[i].slope[h];
+		  nodes[i].r=nodes[i].neigh[h];
+		  nodes[i].reciever_distance=nodes[i].distance[h]; //Storing the distance to the reciever
+		  nodes[i].reciever_slope=nodes[i].slope[h];
+		}
+	    }
+	  if (nodes[i].topsedi_new<=nodes[nodes[i].r].topsedi_new) {nodes[i].r=i; nodes[i].reciever_distance=0; nodes[i].reciever_slope=0;}
+	}
+    }
+}
+
+
+long n_pits(nodetype *nodes,long nx,long ny)
+{
+  long i;
+  long n_pits=0; //This starts at -nx to work around the baselevel nodes
+	
+#pragma omp parallel for default(none) private(i) shared(nx,ny,nodes) //if((nx*ny)>(100*100))
+  for (i=0;i<nx*ny;i++)
+    {
+      nodes[i].p=0;
+      if (nodes[i].b!=1)
+	{
+	  nodes[i].c=0;nodes[i].b=0;
+	}
+    }
+	
+#pragma omp parallel for default(none) private(i) shared(nx,ny,nodes,n_pits) schedule(static) //if((nx*ny)>(100*100))
+  for (i=0;i<ny*nx;i++)
+    {
+      if (nodes[i].r==i && nodes[i].b!=1)
+	{
+#pragma omp atomic
+	  n_pits+=1;
+	  nodes[i].c=-i;
+	  nodes[i].p=1;
+	  //printf("pit node %ld \n",i);
+	}	
+    }
+  return n_pits;
+}
+
+
+void pit_lister(nodetype *nodes,long nx,long ny,long *pit_list)
+{
+  long i;
+  long j=0;
+	
+  //#pragma omp parallel for default(none) private(i) shared(nx,ny,nodes,pit_list) schedule(static) reduction(+:j) //if((nx*ny)>(100*100))
+  for (i=0;i<nx*ny;i++)
+    {
+      if (nodes[i].p==1)
+	{
+	  //printf("pit %ld j %ld \n",i,j);
+	  pit_list[j]=i;
+	  j+=1;
+	}
+    }
+}
+
+
+void add_to_stack(long l,nodetype *nodes,long *stack,long a,double dist)
+{
+  long m,m1,m2;
+  dist+=nodes[l].reciever_distance;
+  nodes[l].distance_to_base=dist;
+  f=f+1;
+  stack[f]=l;
+  nodes[l].c=a;
+  m1=nodes[l].delta;
+  m2=nodes[l+1].delta-1;
+	
+  for(m=m1;m<=m2;m++)
+    {
+      add_to_stack(nodes[m].D,nodes,stack,a,dist);
+    }
+}
+
+
+void reset(nodetype *nodes,long dx,long dy,long nx,long ny)
+{
+  int i;
+  //Initiate variables
+#pragma omp parallel for default(none) private(i) shared(nodes,nx,ny,dx,dy) //if((nx*ny)>(140*140))
+  for (i=0;i<nx*ny;i++)
+    {
+      nodes[i].di=0;
+      nodes[i].D=0;
+      nodes[i].w=0;
+      nodes[i].delta=0;
+      nodes[i].in_stack=0;
+      nodes[i].av_donor_height=0;
+      nodes[i].av_donor_distance=0;
+      nodes[i].drain_area=dx*dy;	
+    }
+}
+
+void count_donors(nodetype *nodes,long nx,long ny)
+{
+  int i;
+  //Count number of donors
+  for (i=0;i<nx*ny;i++)
+    {
+      nodes[nodes[i].r].di=nodes[nodes[i].r].di+1;
+    }
+}
+
+void delta_and_w(nodetype *nodes,long nx,long ny)
+{
+  int i,j;
+	
+	
+  nodes[nx*ny].delta=nx*ny; //Initialize delta for the last node+1
+  //nodes[nx*ny].id=nx*ny;
+  //compute delta
+  for (i=nx*ny-1;i>=0;i--)
+    {
+      nodes[i].delta = nodes[i+1].delta-nodes[i].di;
+    }
+  //compute Dij
+  for (i=0;i<nx*ny;i++)
+    {
+      nodes[(nodes[nodes[i].r].delta+nodes[nodes[i].r].w)].D=i;
+      nodes[nodes[i].r].w+=1;
+    }
+		
+  //Can be outcommented as it is not really used
+#pragma omp parallel for default(none) private(i,j) shared(nodes,nx,ny) //if((nx*ny)>(100*100))
+  for (i=0;i<nx*ny;i++)
+    { for(j=0;j<MAX_NEIGH;j++) { nodes[i].Dij[j]=0; }}
+
+
+
+
+  //compute Dij
+  for (i=0;i<nx*ny;i++) { for (j=0;j<(nodes[i+1].delta-nodes[i].delta);j++) {nodes[i].Dij[j]=nodes[nodes[i].delta+j].D; 	/*printf("i: %ld j %ld, Dij %ld \n",i,j,nodes[i].Dij[j]);*/
+    }	}
+	
+}
+
+void av_distance(nodetype *nodes,long nx,long ny,long dx,long dy)
+{
+  int i,j;
+	
+  //for (i=0;i<nx*ny;i++) printf("di %ld \n",nodes[i].di);
+	
+#pragma omp parallel for default(none) private(i,j) shared(nodes,nx,ny,dx,dy) //if((nx*ny)>(100*100))
+  for (i=0;i<nx*ny;i++)
+    {
+      for (j=0;j<nodes[i].di;j++)
+	{
+	  nodes[i].av_donor_height+=nodes[nodes[i].Dij[j]].topsedi;
+	  //printf("av_donor %g topsedi %g donor topsedi %g di %ld \n",nodes[i].av_donor_height,nodes[i].topsedi,nodes[nodes[i].Dij[j]].topsedi,(nodes[i].di+1));
+	  nodes[i].av_donor_distance+=sqrt(pow(dx*nodes[i].x-dx*nodes[nodes[i].Dij[j]].x,2)+pow(dy*nodes[i].y-dy*nodes[nodes[i].Dij[j]].y,2));
+	  //printf("av_distance %g \n",sqrt(pow(dx*nodes[i].x-dx*nodes[nodes[i].Dij[j]].x,2)+pow(dy*nodes[i].y-dy*nodes[nodes[i].Dij[j]].y,2)));
+	}
+    }
+
+#pragma omp parallel for default(none) private(i) shared(nodes,nx,ny) //if((nx*ny)>(100*100))
+  for (i=0;i<nx*ny;i++)
+    {
+      //printf("av_donor %g \n",nodes[i].av_donor_height);
+      if (nodes[i].di>0) {
+	nodes[i].av_donor_height/=(nodes[i].di);
+	nodes[i].av_donor_distance/=(nodes[i].di);
+	//printf("av_donor %g topsedi %g di %ld \n",nodes[i].av_donor_height,nodes[i].topsedi,(nodes[i].di));
+      }
+    }
+}
+
+void find_stack(nodetype *nodes,long nx,long ny,long *baselevel_list,long n_baselevelnodes,long *flist,long *stack,long n_pits,long *pit_list)
+{
+  f = 0;
+  long j;
+  long i;
+  long a=0;
+  long fl=0;
+  double dist;
+  long l,l1,l2,k;
+
+  //recursive algorithm
+  for (i=0;i<(n_baselevelnodes+n_pits);i++)
+    {
+      if (i<n_baselevelnodes) {
+	j=baselevel_list[i];
+      }
+      else
+	{
+	  j=pit_list[i-n_baselevelnodes];
+	  //printf("pit c %ld \n",nodes[j].c);
+	}
+		
+      flist[fl]=f;
+      fl++;
+      a=nodes[j].c;
+      dist=0;
+      //printf("in \n");
+      //printf("\n a: %d i: %d",a,i);
+      k=j;
+      stack[f]=j;
+      l1=nodes[k].delta;
+      l2=nodes[k+1].delta-1;
+      for (l=l1;l<=l2;l++)
+	{
+	  if(nodes[l].D!=k)
+	    {
+	      add_to_stack(nodes[l].D,nodes,stack,a,dist);
+	    }
+	}
+      flist[fl]=f;
+      fl++;
+      f=f+1;
+    }
+}
+
+
+void reverse_stack(nodetype *nodes,long nx,long ny,long *stack,long *stack2)
+{
+  int i;
+#pragma omp parallel for default(none) private(i) shared(nodes,nx,ny,stack2,stack) //if((nx*ny)>(140*140))
+  for (i=nx*ny-1;i>=0;i--) //Inverting the stack to use it for calculating drainage area
+    {
+      stack2[nx*ny-i-1]=stack[i];
+      //if (nodes[i].c>=0) {nodes[i].in_stack=1; /*printf("in stack: %d \n",stack[i]);*/}
+      nodes[i].in_stack=1;
+    }
+}
+
+
+void find_drainage_area(nodetype *nodes,long nx,long ny,long *stack2)
+{  
+  int i;
+  for (i=0;i<nx*ny;i++) //Computing the drainage area
+    {
+      if (nodes[stack2[i]].r!=stack2[i] && nodes[stack2[i]].c>=0)
+	{
+	  nodes[nodes[stack2[i]].r].drain_area+=nodes[stack2[i]].drain_area;
+	}
+    }
+}
+
+
+
+
+void pit_water(nodetype *nodes,long nx,long ny,long *stack,long *stack2,long *pit_list,long npits)
+{
+  long i,j,h;
+  double tmp;
+  long node;
+
+
+
+  for (i=0;i<nx*ny;i++) //Computing the drainage area
+    {
+      if (nodes[stack2[i]].r!=stack2[i] && nodes[stack2[i]].c<0)
+	{
+	  nodes[nodes[stack2[i]].r].drain_area+=nodes[stack2[i]].drain_area;
+	}
+    }
+
+  int indi=0;
+  int counter=0;
+  
+  for (i=0;i<npits;i++)
+    {
+      h=pit_list[i];
+      tmp=1e80;
+		indi=0;
+      for (j=0;j<nodes[j].n_neigh;j++)
+	{
+	  if (nodes[nodes[h].neigh[j]].c>=0 && nodes[nodes[h].neigh[j]].topsedi<tmp)
+	    {
+	      tmp=nodes[nodes[h].neigh[j]].topsedi;
+	      node=nodes[h].neigh[j];
+	      indi=1;
+	    }
+	
+
+	}
+      if (indi==1) {
+	nodes[node].drain_area+=nodes[h].drain_area;
+	counter++;
+      }
+
+    } 
+
+	 //printf("number of pits draining %d npits %ld \n",counter,npits);
+  
+}
+
+
+
+
+
+
+	
+void get_donorlist(nodetype *nodes,long nx,long ny, long *stack,double dx,double dy,long *stack2,long *flist,long *baselevel_list,long n_baselevelnodes,long n_pits,long *pit_list)
+{
+  reset(nodes,dx,dy,nx,ny);
+  count_donors(nodes,nx,ny);
+  delta_and_w(nodes,nx,ny);
+  av_distance(nodes,nx,ny,dx,dy);
+  find_stack(nodes,nx,ny,baselevel_list,n_baselevelnodes,flist,stack,n_pits,pit_list);
+  reverse_stack(nodes,nx,ny,stack,stack2);
+  //pit_water(nodes,nx,ny,stack,stack2,pit_list,n_pits);
+  find_drainage_area(nodes,nx,ny,stack2);
+	
+  /*
+    long i;
+    for (i=0;i<nx*ny;i++)
+    {
+    if (nodes[stack[i]].b==1 || nodes[stack[i]].p==1) printf("\n\n\n\n\n");
+    printf("stack[%ld] = %ld \n",i,stack[i]);
+    }
+  */
+	
+}
+
+void remove_recur(long l,nodetype *nodes,long a)
+{
+  long l1,l2;
+  nodes[l].c=a;
+  l1=nodes[l].delta;
+  l2=nodes[l+1].delta-1;
+	
+  for(l=l1;l<=l2;l++)
+    {
+      remove_recur(nodes[l].D,nodes,a);
+    }
+}
+
+void drain_recur(long l,nodetype *nodes,double height,long drainplus,long a)
+{
+  if (nodes[l].bed<=height)
+    {
+      long l1,l2;
+      nodes[l].drain_area+=drainplus;
+      l1=nodes[l].delta;
+      l2=nodes[l+1].delta-1;
+      for(l=l1;l<=l2;l++)
+	{
+	  drain_recur(nodes[l].D,nodes,height,drainplus,a);
+	}
+    }
+}
+
+
+
+
+
+
+
+
+
+
+long pit_remover(nodetype *nodes,long nx,long ny,long *store,double *tmp)
+{
+	
+  long i,h;
+
+#pragma omp parallel for default(none) private(i) shared(tmp,nx,ny) //if((nx*ny)>(140*140))
+  for (i=0;i<nx*ny;i++) {tmp[i]=1e8;}
+#pragma omp parallel for default(none) private(i) shared(store,nx,ny) //if((nx*ny)>(140*140))
+  for (i=0;i<nx*ny;i++) {store[i]=0;}
+
+
+#pragma omp parallel for default(none) private(i,h) shared(store,nodes,tmp,nx,ny) //if((nx*ny)>(140*140))
+  for (i=0;i<ny*nx;i++)
+    {
+      if (nodes[i].c<0)
+	{
+	  for (h=0;h<nodes[i].n_neigh;h++)
+	    {
+	      if (nodes[i].neigh[h]!=i && nodes[nodes[i].neigh[h]].c>=0 && nodes[nodes[i].neigh[h]].topsedi<=tmp[-nodes[i].c])
+		{
+		  tmp[-nodes[i].c]=nodes[nodes[i].neigh[h]].topsedi;
+		  store[-nodes[i].c]=nodes[i].neigh[h];
+		}
+	    }
+	}
+    }		
+	
+	
+			
+  /*
+  //Updating catchment without recursion	
+  long p=0;
+  long j;
+  for (i=0;i<nx*ny;i++)
+  {
+  if (store[i]!=0)
+  {
+  //	printf("%d \n",i);
+  for (j=0;j<nx*ny;j++)
+  {
+  if (nodes[j].c==-i)
+  {
+  //printf("j: %d \n",j);
+  nodes[j].c=nodes[store[i]].c;
+  }
+  }
+  p+=1;
+			
+  for (h=0;h<nx*ny;h++)
+  {
+  if (nodes[h].c==nodes[store[i]].c && nodes[h].bed<=nodes[store[i]].bed && nodes[h].in_stack==1)
+  nodes[h].drain_area+=nodes[i].drain_area;
+  }
+  }
+  }
+	
+  */
+	
+  /*
+  //printing stuff
+  printf("\n");
+  printf("dræning før \n ");
+	
+  for (i=0;i<nx*ny;i++) {if (i%nx==0 && i!=0) {printf("\n"); } printf("%ld ",nodes[i].drain_area); }
+	
+  printf("store før \n");
+  for (i=0;i<nx*ny;i++) {if (i%nx==0 && i!=0) {printf("\n"); } printf("%ld ",store[i]);  }
+	
+  printf("\n");
+  printf("c før \n");
+  for (i=0;i<nx*ny;i++) {if (i%nx==0 && i!=0) {printf("\n");} printf("%ld ",nodes[i].c); }	
+	
+  */
+	
+  long a,l,l1,l2,p;
+  long drainplus;
+  double height;
+  p=0;
+#pragma omp parallel for default(none) shared(store,nodes,nx,ny,p) private(l,l1,l2,a,i,h,height,drainplus) schedule(static) //if((nx*ny)>(140*140))
+  for (i=0;i<nx*ny;i++) 
+    {
+      if (store[i]!=0)
+	{
+	  a=nodes[store[i]].c;
+	  nodes[i].c=a;
+	  l1=nodes[i].delta;
+	  l2=nodes[i+1].delta-1;
+	  for (l=l1;l<=l2;l++)
+	    {
+	      if(nodes[l].D!=i)
+		{
+		  remove_recur(nodes[l].D,nodes,a);
+		}
+	    }
+			
+#pragma omp atomic
+	  p+=1;
+			
+	  drainplus=nodes[i].drain_area;
+	  height=nodes[store[i]].topsedi;
+	  nodes[a].drain_area+=drainplus;
+	  l1=nodes[a].delta;
+	  l2=nodes[a+1].delta-1;
+	  for (l=l1;l<=l2;l++)
+	    {
+	      if(nodes[l].D!=a)
+		{
+		  drain_recur(nodes[l].D,nodes,height,drainplus,a);
+		}
+	    }
+
+	  /*
+	  //Updating the drainage area without recursion
+	  #pragma omp parallel for default(none) shared(store,nodes,nx,ny,i) private(h) schedule(static) //if((nx*ny)>(140*140))
+	  for (h=0;h<nx*ny;h++)
+	  {
+	  if (nodes[h].c==nodes[store[i]].c && nodes[h].bed<=nodes[store[i]].bed && nodes[h].in_stack==1)
+	  {
+	  nodes[h].drain_area+=nodes[i].drain_area;
+	  }
+	  }
+	  */
+	}
+    }
+  //#pragma omp barrier //not really needed
+	
+  return p;	
+}
+
+
+void node_uplifts(nodetype *nodes,long nx,long ny,long npits,model_parameters *parameters)
+{
+  int i;
+  double x=0;
+  char uplift_type;
+  uplift_type=parameters[0].uplift_type;
+	
+  //#pragma omp parallel for default(none) shared(nodes,nx,ny,npits,parameters,uplift_type) private(i,x) //if((nx*ny)>(140*140))
+  for (i=0;i<nx*ny;i++)
+    {
+      nodes[i].node_uplift=0;
+      x=0;
+      if (npits>0) //Gives the opportunity to change the uplift after there is no more pits
+	{
+	  if (uplift_type=='a'){
+	    //uniform uplift
+	    if (nodes[i].b!=1) {x=ny;}
+	  }
+	  else if (uplift_type=='b')
+	    {
+	      //Tilting uplift
+	      x=(i)/nx; //Utilizing that integer division truncates any fraction part
+	    }
+	  else if (uplift_type=='c')
+	    {
+	      //Tilting uplift turning sideways
+	      if (nodes[i].b!=1) x=2*(i%nx); //Utilizing that integer division truncates any fraction part
+	    }
+	  else if (uplift_type=='d')
+	    {
+	      //Tilting both ways
+	      if (nodes[i].b!=1) x=2*((i/nx)+5*(i%nx));
+	    }
+	  else if (uplift_type=='e')
+	    {
+	      //Tilting both ways in other direction
+	      if (nodes[i].b!=1) x=(0.1*(i/nx)+2*(nx-(i%nx)));
+	    }
+	  else if (uplift_type=='f')
+	    {
+	      //Tilting both ways in other direction
+	      if (nodes[i].b!=1) x=((nx-2*abs((i/nx-(nx/2)))));
+	    }
+	  else if (uplift_type=='g')
+	    {
+	      double number_tilting=10.0;
+	      if (nodes[i].b!=1) {
+		if (i<number_tilting*nx)
+		  {
+		    x=(ny/number_tilting)*((i)/nx);
+		  }
+		else
+		  {
+		    x=ny;
+		  }
+	      }
+	    }
+	  else {printf("Wrong uplift_type parameter assigned. This error message is called from the node_uplifts function (npits>0) \n"); exit(1);}
+	}		
+      else //If there is still pits left, we have this type of uplift
+	{	
+	  nodes[i].node_uplift=0;		
+	  x=0;
+			
+	  if (uplift_type=='a'){
+	    //uniform uplift
+	    if (nodes[i].b!=1) {x=ny;}
+	  }
+	  else if (uplift_type=='b')
+	    {
+	      //Tilting uplift
+	      x=(i)/nx; //Utilizing that integer division truncates any fraction part
+	    }
+	  else if (uplift_type=='c')
+	    {
+	      //Tilting uplift turning sideways
+	      if (nodes[i].b!=1) x=2*(i%nx); //Utilizing that integer division truncates any fraction part
+	    }
+	  else if (uplift_type=='d')
+	    {
+	      //Tilting both ways
+	      if (nodes[i].b!=1) x=2*((i/nx)+5*(i%nx));
+	    }
+	  else if (uplift_type=='e')
+	    {
+	      //Tilting both ways in other direction
+	      if (nodes[i].b!=1) x=(0.1*(i/nx)+2*(nx-(i%nx)));
+	    }
+	  else if (uplift_type=='f')
+	    {
+	      //Tilting both ways in other direction
+	      if (nodes[i].b!=1) x=((nx-2*abs((i/nx-(nx/2)))));
+	    }
+	  else if (uplift_type=='g')
+	    {
+	      double number_tilting=10.0;
+	      if (nodes[i].b!=1) {
+		if (i<number_tilting*nx)
+		  {
+		    x=(ny/number_tilting)*((i)/nx);
+		  }
+		else
+		  {
+		    x=ny;
+		  }
+	      }
+	    }
+	  else {printf("Wrong uplift_type parameter assigned. This error message is called from the node_uplifts function (npits<0) \n"); exit(1);}
+	}
+		
+      //if (i<(nx*ny)/4 && nodes[i].b!=1) {x=ny/4;}
+      //else if (nodes[i].b!=1) {x=ny;}
+		
+      //nodes[i].node_uplift=(x/ny)*U*deltat;
+      nodes[i].node_uplift=(x/ny);
+      //printf("node %ld uplift %g \n",i,nodes[i].node_uplift);
+    }
+}
+
+
+
+void uplift(nodetype *nodes,long nx,long ny,long npits,model_parameters *parameters)
+{
+  long i;
+  double deltat=parameters[0].deltat;
+  double U=parameters[0].U;
+#pragma omp parallel for default(none) shared(nodes,nx,ny,U,deltat) private(i) //if((nx*ny)>(100*100))
+  for (i=0;i<nx*ny;i++)
+    {			
+      {
+	nodes[i].bed+=nodes[i].node_uplift*deltat*U;
+	nodes[i].topsedi+=nodes[i].node_uplift*deltat*U;
+	//printf("uplift %g node %ld \n",nodes[i].node_uplift,i);
+      }
+    } 
+	
+  /*
+    for (i=0;i<nx*ny;i++)
+    {
+    if (i%nx==0) {printf("\n");}
+    printf("%2.3f ",nodes[i].node_uplift);
+    }
+  */
+
+
+}
+
+void weathering(nodetype *nodes,long nx,long ny,model_parameters *parameters)
+{
+  long i;
+  double weath;
+  double sedi_thick;
+	
+  char humped=parameters[0].humped_weathering;
+
+  if(humped=='y') {
+#pragma omp parallel for default(none) shared(nodes,nx,ny,parameters) private(i,sedi_thick,weath) //if((nx*ny)>(100*100))
+    for (i=0;i<nx*ny;i++) 
+      {
+	if (nodes[i].b!=1)
+	  {
+	    sedi_thick=nodes[i].topsedi-nodes[i].bed;
+	    //if (sedi_thick<R_star)
+	    if (sedi_thick<parameters[0].R_star)	
+	      {
+		//weath=deltat*(bare_rock_weath+sedi_thick*((max_weath-bare_rock_weath)/R_star));
+		weath=parameters[0].deltat*(parameters[0].bare_rock_weath+sedi_thick*((parameters[0].max_weath-parameters[0].bare_rock_weath)/parameters[0].R_star));
+	      }
+	    else
+	      {
+		//weath=deltat*max_weath*exp((R_star-sedi_thick)/R_scale);
+		weath=parameters[0].deltat*parameters[0].max_weath*exp((parameters[0].R_star-sedi_thick)/parameters[0].R_scale);
+	      }
+
+
+	    if (nodes[i].bed<0)
+	      {
+		weath=0;	
+	      }
+	    else if ((nodes[i].bed-(1-parameters[0].porosity)*weath)<0)
+	      {
+		weath=nodes[i].bed;
+		nodes[i].bed=0;
+	      }
+	    
+	    sedi_thick+=weath;
+	    //nodes[i].bed-=(1-porosity)*weath;
+	    nodes[i].bed-=(1-parameters[0].porosity)*weath;
+	    nodes[i].weath=weath;
+	    //nodes[i].topsedi+=porosity*weath;
+	    nodes[i].topsedi+=parameters[0].porosity*weath;
+	    nodes[i].sediment_thickness=nodes[i].topsedi-nodes[i].bed;
+	  }
+      }
+  }
+  else {
+#pragma omp parallel for default(none) shared(nodes,nx,ny,parameters) private(i,sedi_thick,weath) //if((nx*ny)>(100*100))
+    for (i=0;i<nx*ny;i++) 
+      {
+	if (nodes[i].b!=1 && nodes[i].c>=0){
+	  sedi_thick=nodes[i].topsedi-nodes[i].bed;
+	  weath=parameters[0].deltat*parameters[0].max_weath*exp(-sedi_thick/parameters[0].R_scale);
+
+
+
+	    if (nodes[i].bed<0)
+	      {
+		weath=0;
+		printf("bed %g \n",nodes[i].bed);
+	      }
+	    else if ((nodes[i].bed-(1-parameters[0].porosity)*weath)<0)
+	      {
+		weath=nodes[i].bed;
+		nodes[i].bed=0;
+		printf("her\n");
+	      }
+
+
+
+
+
+	  sedi_thick+=weath;
+	  //nodes[i].bed-=(1-porosity)*weath;
+	  nodes[i].bed-=(1-parameters[0].porosity)*weath;
+	  nodes[i].weath=weath;
+	  //nodes[i].topsedi+=porosity*weath;
+	  nodes[i].topsedi+=parameters[0].porosity*weath;
+	  nodes[i].sediment_thickness=nodes[i].topsedi-nodes[i].bed;
+	}
+      }
+  }
+}
+
+
+
+void isostasy(nodetype *nodes,long nx,long ny)
+{
+  double rho_c=2600;
+  double rho_m=3300;
+	
+  double rho_contrast=rho_c/rho_m;
+	
+  double deflection;
+  long i;
+  char local_isostasy='n';
+	
+  if (local_isostasy=='y') {
+	
+#pragma omp parallel for default(none) private(i,deflection) shared(nodes,nx,ny,rho_contrast) //if((nx*ny)>(140*140))
+    for (i=0;i<nx*ny;i++)
+      {
+	deflection=(nodes[i].top_old-nodes[i].topsedi)*rho_contrast;
+	nodes[i].deflection=deflection;
+	nodes[i].bed+=deflection;
+	nodes[i].topsedi+=deflection;
+      }
+  }
+  else if (local_isostasy=='n') {
+    double deflection_accumulator=0;
+
+#pragma omp parallel for default(none) private(i) shared(nodes,nx,ny,rho_contrast) reduction(+: deflection_accumulator)//if((nx*ny)>(140*140))
+    for (i=0;i<nx*ny;i++)
+      {
+	deflection_accumulator+=(nodes[i].top_old-nodes[i].topsedi)*rho_contrast;
+      }
+	
+    deflection_accumulator/=nx*ny;
+    //printf("deflection_accumulator %g \n",deflection_accumulator);
+	
+#pragma omp parallel for default(none) private(i) shared(nodes,nx,ny,rho_contrast,deflection_accumulator) //if((nx*ny)>(140*140))
+    for (i=0;i<nx*ny;i++)
+      {
+	if (nodes[i].b!=1)
+	  {
+	    nodes[i].deflection=deflection_accumulator;
+	    nodes[i].bed+=deflection_accumulator;
+	    nodes[i].topsedi+=deflection_accumulator;
+	  }
+      }
+	
+  }
+  else {
+    printf("No isostasy \n");
+  }
+		
+}
+
+
+void smooth_everything_handler(nodetype *nodes,long nx,long ny,model_parameters *parameters)
+{
+  long i;
+	
+  long k;
+
+  double tmp_erosion=0;
+  double tmp_relsedi=0;
+  double tmp_diff=0;
+  double tmp_saltabr=0;
+  double tmp_streampower=0;
+
+  double difference_erosion=0;
+  double difference_relsedi=0;
+  double difference_diff=0;
+  double difference_saltabr=0;
+  double difference_streampower=0;
+  //double tmp_tmp=0;
+  double smooth=smoother;
+
+  k=nodes[0].smooth_counter;
+	
+  //#pragma omp parallel for default(none) private(i,difference_erosion,tmp_erosion,difference_relsedi,tmp_relsedi,difference_diff,tmp_diff,difference_saltabr,tmp_saltabr,difference_streampower,tmp_streampower) shared(nodes,k,nx,ny,smooth)
+  for (i=0;i<nx*ny;i++)
+    {
+      tmp_erosion=nodes[i].smooth_erosion_list[k];
+      tmp_relsedi=nodes[i].smooth_relsedi_list[k];
+      tmp_diff=nodes[i].smooth_diff_list[k];
+      tmp_saltabr=nodes[i].smooth_saltabr_list[k];
+      tmp_streampower=nodes[i].smooth_streampower_list[k];
+
+      difference_erosion=(nodes[i].erosion-tmp_erosion)/smooth;
+      nodes[i].smooth_erosion+=difference_erosion;
+      nodes[i].smooth_erosion_list[k]=nodes[i].erosion;
+		/*if (nodes[i].id==108 && nodes[i].erosion>0)
+		{
+			printf("smooth erosion below zero %g \n",nodes[i].smooth_erosion);
+			printf("Difference erosion %g erosion now %g tmp_erosion %g \n",difference_erosion,nodes[i].erosion,tmp_erosion);
+			//printf("x %ld y %ld id %ld \n",nodes[i].x,nodes[i].y,nodes[i].id);
+			for (i=0;i<smoother;i++)
+				printf("Erosoin  list %g \n",nodes[i].smooth_erosion_list[k]);
+		}
+		*/
+      /*
+		if (i==250)
+		{
+			printf("k %ld \n",k);
+			printf("difference erosion %g \n",difference_erosion);
+			printf("smooth erosion %g \n",nodes[i].smooth_erosion);
+			//for (int ii=0;ii<smoother;ii++)
+			  //printf("Erosoin  list %g \n",nodes[i].smooth_erosion_list[ii]);
+				
+		}
+      */	
+	if (nodes[i].smooth_erosion<0 && fabs(nodes[i].smooth_erosion)>1e-16)
+		{
+		  printf("smooth erosion below zero %g i %ld \n",nodes[i].smooth_erosion,i);
+			printf("Difference erosion %g erosion now %g tmp_erosion %g \n",difference_erosion,nodes[i].erosion,tmp_erosion);
+			printf("x %ld y %ld id %ld \n",nodes[i].x,nodes[i].y,nodes[i].id);
+			for (int ii=0;ii<smoother;ii++)
+				printf("Erosoin  list %g \n",nodes[i].smooth_erosion_list[ii]);
+			exit(1);
+		}
+      
+      difference_relsedi=(nodes[i].rel_sedi-tmp_relsedi)/smooth;
+      nodes[i].smooth_relsedi+=difference_relsedi;
+      nodes[i].smooth_relsedi_list[k]=nodes[i].rel_sedi;
+
+      difference_diff=(nodes[i].diff_erosion-tmp_diff)/smooth;
+      nodes[i].smooth_diff+=difference_diff;
+      nodes[i].smooth_diff_list[k]=nodes[i].diff_erosion;
+
+      difference_saltabr=(nodes[i].saltabr_incision-tmp_saltabr)/smooth;
+      nodes[i].smooth_saltabr+=difference_saltabr;
+      nodes[i].smooth_saltabr_list[k]=nodes[i].saltabr_incision;
+
+      if (nodes[i].smooth_saltabr<0 && fabs(nodes[i].smooth_saltabr)>1e-16)
+		{
+			printf("smooth saltabr below zero %g \n",nodes[i].smooth_saltabr);
+			printf("Difference saltabr %g saltabr now %g tmp_saltabr %g \n",difference_saltabr,nodes[i].saltabr_incision,tmp_saltabr);
+			printf("x %ld y %ld id %ld \n",nodes[i].x,nodes[i].y,nodes[i].id);
+			for (int ii=0;ii<smoother;ii++)
+				printf("Erosoin  list %g \n",nodes[i].smooth_erosion_list[ii]);
+
+			exit(1);
+		}
+
+      difference_streampower=(nodes[i].stream_power-tmp_streampower)/smooth;
+      nodes[i].smooth_streampower+=difference_streampower;
+      nodes[i].smooth_streampower_list[k]=nodes[i].stream_power;
+    }
+	
+  //printf("smooth erosion %g \n",nodes[4*100].smooth_erosion);
+	
+  nodes[0].smooth_counter++;
+  nodes[0].smooth_counter=nodes[0].smooth_counter%smoother;
+  
+}
+
+
+//void smooth_list_filler(nodetype *nodes,long nx,long ny,model_parameters *parameters)

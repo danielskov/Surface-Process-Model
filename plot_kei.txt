@@ -1,0 +1,7 @@
+set terminal png
+set output "plot_kei.png"
+set key outside
+set xlabel "x"
+set ylabel "y"
+plot \
+"kei.txt" index 0 with color red

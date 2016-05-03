@@ -1,0 +1,465 @@
+#include "header.h"
+
+void weathering_noheightchange(nodetype *nodes,long nx,long ny,model_parameters *parameters)
+{
+  //This function handles weathering in the case that the height of the bedrock should not be moved.
+  long i;
+  double weath;
+  double sedi_thick;
+	
+  char humped=parameters[0].humped_weathering;
+
+  if(humped=='y') {
+#pragma omp parallel for default(none) shared(nodes,nx,ny,parameters) private(i,weath,sedi_thick) //if((nx*ny)>(100*100))
+    for (i=0;i<nx*ny;i++) 
+      {
+	if (nodes[i].b!=1)
+	  {
+	    sedi_thick=nodes[i].topsedi-nodes[i].bed;
+	    //if (sedi_thick<R_star)
+	    if (sedi_thick<parameters[0].R_star)	
+	      {
+		weath=parameters[0].deltat*(parameters[0].bare_rock_weath+sedi_thick*((parameters[0].max_weath-parameters[0].bare_rock_weath)/parameters[0].R_star));
+	      }
+	    else
+	      {
+		weath=parameters[0].deltat*parameters[0].max_weath*exp((parameters[0].R_star-sedi_thick)/parameters[0].R_scale);
+	      }
+	    nodes[i].topsedi+=parameters[0].porosity*weath;
+	    nodes[i].weath=weath;
+			
+	  }
+      }
+  }
+  else {
+    //#pragma omp parallel for default(none) shared(nodes,nx,ny,parameters) private(i,weath,sedi_thick) //if((nx*ny)>(100*100))
+    for (i=0;i<nx*ny;i++) 
+      {
+	sedi_thick=nodes[i].topsedi-nodes[i].bed;
+	weath=parameters[0].deltat*parameters[0].max_weath*exp(-sedi_thick/parameters[0].R_scale);
+	//printf("Topsedi before %g \n",nodes[i].topsedi);
+	nodes[i].topsedi+=weath;
+	nodes[i].weath=weath;
+		
+	//printf("topsedi %g topsedi-bed %g weath %g \n",nodes[i].topsedi,nodes[i].topsedi-nodes[i].bed,weath);
+      }
+  }
+}
+
+long lowest_donor_noheightchange(nodetype *nodes,long sedi_node)
+{
+  long i;
+  long h=sedi_node;
+  double tmp=INT_MAX;
+  long tmp_node,lowest_donor;
+  tmp_node=-1;
+  for (i=0;i<nodes[h].di;i++)
+    {
+      if (tmp>nodes[nodes[h].Dij[i]].topsedi)
+	{
+	  tmp=nodes[nodes[h].Dij[i]].topsedi;
+	  tmp_node=nodes[h].Dij[i];
+	}
+    }
+  if (nodes[h].di==0 || tmp_node==-1) {tmp_node=0; printf("problemer i lowest donor script \n"); exit(1);}
+  lowest_donor=tmp_node;
+  return lowest_donor;
+}
+
+
+
+void alluviate_noheightchange(nodetype *nodes,long *stack,long h,double deposition,long u,model_parameters *parameters) //The alluviate2 function works on topsedi instead of topsedi. This means that the alluviation will have an actual effect, as 
+{
+  long g,i;
+  double topsedi;
+  double small_factor; //This is the height below the donor node that cannot be alluviated over
+
+  /*
+    ++u; u=2;
+    if (u==1) {topsedi=nodes[h].topsedi;}
+    //This is done because the alluviating firstly moved downstream, thus updating the topsedi. We should thus only use the old topsedi for the first node
+    else {topsedi=nodes[h].topsedi;}
+  */
+  u++;
+  //if (u>1) printf("u %ld depo %g \n",u,deposition);
+	
+  topsedi=nodes[h].topsedi;
+	
+  if (nodes[h].di==0) {nodes[h].topsedi+=deposition; if (deposition>2) {printf("Large deposition on hilltope, %g node %ld \n",deposition,h);} deposition=0; /*printf("u% ld deposition: %5.2f topsedi before %6.2f, topsedi now %6.2f upstream erosion %5.2f, sediment capa %5.2f erosion %5.2f \n",u,deposition,nodes[h].topsedi,nodes[h].topsedi,nodes[h].upstream_erosion*2,nodes[h].sediment_capa_sedi*2,nodes[h].erosion*2);*/}
+  else {
+    g=lowest_donor_noheightchange(nodes,h); /*I'm using the lowest donor, and not just the lowest neighbour, to avoid mixing sediments from different catchmetns*/
+    small_factor=parameters[0].sedimentation_angle*nodes[g].reciever_distance; /*The sedimentation angle reflects the maximum angle the deposits can have, in [meters/meter]*/
+    //g=lowest_neighbour_above_new(nodes,h);
+    if ((topsedi+deposition)<(nodes[g].topsedi-small_factor)) {
+      nodes[h].topsedi=topsedi+deposition;
+      nodes[h].fluvial_deposition=deposition;
+      deposition=0;
+      for (i=0;i<nodes[h].di;i++) {if (nodes[h].topsedi>nodes[nodes[h].Dij[i]].topsedi) {printf("u: %ld deposition %4.3f, di: %ld g: %ld Dij: %ld \n ",u,deposition,nodes[h].di,g,nodes[h].Dij[i]); printf("node: %ld, donor: %ld, n_donors %ld, node height new %8.4f, node h before %8.4f, donor h %8.4f, Dij h %8.4f \n",h,g,nodes[h].di,nodes[h].topsedi,nodes[h].topsedi,nodes[g].topsedi,nodes[nodes[h].Dij[i]].topsedi);
+	  exit(1);}}
+    }
+    else if ((topsedi)>(nodes[g].topsedi-small_factor)){
+      if (topsedi>(nodes[g].topsedi)) printf("Problemer i alluviate 1, topsedi %6.4f u: %ld ts n %6.4f g h %6.4f g old %6.4f \n",topsedi,u,nodes[h].topsedi,nodes[g].topsedi,nodes[g].topsedi);
+      //printf("node: %ld, donor: %ld, n_donors %ld \n",h,g,nodes[h].di);
+      alluviate_noheightchange(nodes,stack,g,deposition,u,parameters);
+    }
+    else {
+      deposition-=(nodes[g].topsedi-small_factor-topsedi);
+      nodes[h].fluvial_deposition=(nodes[g].topsedi-small_factor-topsedi);
+      //printf("h %ld ,depo %5.3f \n ",h,nodes[h].fluvial_deposition);
+      nodes[h].topsedi=nodes[g].topsedi-small_factor;
+      for (i=0;i<nodes[h].di;i++) {if (nodes[h].topsedi>nodes[nodes[h].Dij[i]].topsedi) printf("Problemer i alluviate 2 \n");}
+      alluviate_noheightchange(nodes,stack,g,deposition,u,parameters);
+    }
+  }	
+}
+//The alluviate function has been made so that the alluviation will continuisly go up a distinct catchment. This function should be improved, so that the sediment would deposit in the overall lowest neighbour upstream from the initially alluviating node
+
+
+
+void sediment_transport_noeheightchange(nodetype *nodes,long *stack,long nx,long ny,double dx,double dy,long *stack2,long npits,model_parameters *parameters)
+{		
+  long i;
+  long h; //The current position in the inversed stack, that is stack2
+  double deposition;
+  double lower_boundary;
+  //char do_fluvial_deposition='n';
+	
+  //if (npits!=0) {do_deposition='n';}
+  long u;
+	
+	
+  for (i=0;i<nx*ny;i++) 
+    {
+      nodes[i].upstream_erosion_old=nodes[i].upstream_erosion;
+      nodes[i].upstream_erosion=nodes[i].erosion;
+      nodes[i].fluvial_deposition=0;
+    }
+	
+  for (i=0;i<nx*ny;i++) //Looping through the nodes
+    {
+      h=stack2[i];
+      if (nodes[h].r!=h && nodes[h].in_stack==1 && nodes[h].b!=1) //Only nodes that are in the stack and are not pits or baselevel nodes are looped
+	{
+	  if ((nodes[h].topsedi+parameters[0].deltat*(nodes[h].upstream_erosion-nodes[h].sediment_capa_sedi)/(dx*dy))>nodes[h].bed && (nodes[h].topsedi+parameters[0].deltat*(nodes[h].upstream_erosion-nodes[h].sediment_capa_sedi)/(dx*dy))>nodes[nodes[h].r].topsedi) //If the erosion or deposition doesn't lower the top of the sediment below the top of the bedrock
+	    {
+	      if (parameters[0].do_fluvial_deposition=='n') { //This is when we have no fluvial deposition
+		if (nodes[h].upstream_erosion<nodes[h].sediment_capa_sedi) //If the sediment capacity is larger than the upstream erosion we pick up sediment
+		  {
+		    nodes[h].topsedi=nodes[h].topsedi+parameters[0].deltat*(nodes[h].upstream_erosion-nodes[h].sediment_capa_sedi)/(dx*dy); //The top of the sediment pile is lowered by the difference between sediment capacity and  the upstream erosion
+		    nodes[h].moved_sediment=-(nodes[h].upstream_erosion-nodes[h].sediment_capa_sedi)/(dx*dy); //The amount of sediment that is picked up in the node is calculated as the difference between the amount of sediment in the stream (upstream erosion) before and after picking up the sediment
+		    nodes[h].upstream_erosion=nodes[h].sediment_capa_sedi; //The upstream erosion is set to sediment capacity, as it is moving sediment on full capacity
+		    if (nodes[h].upstream_erosion>nodes[h].sediment_capa_sedi) {nodes[h].upstream_erosion=nodes[h].sediment_capa_sedi;} //This should never happen, as we just assign upstream erosion to be equal to the sediment capacity just one line above
+		  }
+		else { //If the amount of sediment entering the node equals or exceeds the carriyng capacity, and there is no deposition, no sediment is picked up, and the sediment entering the node just passes on to the next node.
+		  //nodes[h].upstream_erosion+=nodes[h].topsedi+parameters[0].deltat*(nodes[h].upstream_erosion-nodes[h].sediment_capa_sedi)/(dx*dy);
+		  nodes[h].moved_sediment=0; //The moved sediment is assigned to zero, as zero sediment is picked up in the node.
+		}
+	      }
+	      else if(parameters[0].do_fluvial_deposition=='y') { //This is when we have fluvial deposition
+		if (nodes[h].upstream_erosion<=nodes[h].sediment_capa_sedi) //Handles the case where we have erosion to above the bedrock level
+		  {
+		    nodes[h].topsedi=nodes[h].topsedi+parameters[0].deltat*(nodes[h].upstream_erosion-nodes[h].sediment_capa_sedi)/(dx*dy); //The top of the sediment pile is lowered by the difference between sediment capacity and the upstream erosion
+		    nodes[h].moved_sediment=-(nodes[h].upstream_erosion-nodes[h].sediment_capa_sedi)/(dx*dy); //The amount of sediment that is picked up in the node is calculated as the difference between the amount of sediment in the stream (upstream erosion) before and after picking up the sediment
+		    nodes[h].upstream_erosion=nodes[h].sediment_capa_sedi; //The upstream erosion is set to sediment capacity, as it is moving sediment on full capacity
+		    if (nodes[h].topsedi>nodes[h].topsedi) {printf("Den går da opad i deposit \n");}
+		    //printf("Formentlig mest her \n");
+		  }
+		else //Handles the case where we have deposition
+		  {
+		    u=0;
+		    deposition=parameters[0].deltat*(nodes[h].upstream_erosion-nodes[h].sediment_capa_sedi)/(dx*dy); //Calculates the height of the pile of sediment that has to be deposited
+		    //printf("deposition: %8.3f \n",deposition);
+		    nodes[h].moved_sediment=0;
+		    nodes[h].upstream_erosion=nodes[h].sediment_capa_sedi;
+		    //printf("tit her? deposition %g \n",deposition);
+		    alluviate_noheightchange(nodes,stack,h,deposition,u,parameters);
+		  }
+	      }
+	      else {
+		printf("Wrong allocation of do_fluvial_deposition parameter. Should be either 'y' or 'n'. This error message is in sediment_transport2 function\n"); exit(1);
+	      }
+				
+	    }
+	  else if ((nodes[h].topsedi+parameters[0].deltat*(nodes[h].upstream_erosion-nodes[h].sediment_capa_sedi)/(dx*dy))<=nodes[h].bed ||
+		   (nodes[h].topsedi+parameters[0].deltat*(nodes[h].upstream_erosion-nodes[h].sediment_capa_sedi)/(dx*dy))<=nodes[nodes[h].r].topsedi) //Used when the erosion will remove all sediment in the node
+	    {
+	      if (nodes[h].bed<=nodes[nodes[h].r].topsedi) {
+		lower_boundary=nodes[nodes[h].r].topsedi+1e-1; 
+		if (lower_boundary>nodes[h].topsedi) {
+		  lower_boundary=nodes[nodes[h].r].topsedi+1e-2;} 
+		if (lower_boundary>nodes[h].topsedi) {
+		  lower_boundary=(nodes[nodes[h].r].topsedi+nodes[h].topsedi)/2; printf("Sediment transport her\n");}
+	      }
+	      else {lower_boundary=nodes[h].bed;}
+	      if (lower_boundary==0) {lower_boundary=(nodes[nodes[h].r].topsedi+nodes[h].topsedi)/2;} //The lower boundary thus becomes the mean of the nodes height and the recievers height
+	      nodes[h].upstream_erosion=nodes[h].upstream_erosion+(nodes[h].topsedi-lower_boundary)*dx*dy/parameters[0].deltat;
+	      nodes[h].topsedi=lower_boundary;
+	      nodes[h].moved_sediment=(nodes[h].topsedi-nodes[h].topsedi)/parameters[0].deltat;
+	      //if (nodes[h].topsedi>nodes[h].topsedi) {printf("Den går da opad sed trans indi %ld i: h %ld low_bound %4.2f \n",indi,h,lower_boundary);}		
+	    }
+	  else
+	    {
+	      printf("MAYOR ALERT \n");
+	      exit(1);
+	    }
+	  if (nodes[h].topsedi<nodes[h].bed) {nodes[h].topsedi=nodes[h].bed; printf("Ever used 1 \n");}
+			
+			
+	  if (nodes[h].upstream_erosion<0) {nodes[h].upstream_erosion=0; printf("Ever used 1 \n");}
+			
+	  nodes[nodes[h].r].upstream_erosion=nodes[nodes[h].r].upstream_erosion+nodes[h].upstream_erosion;
+			
+	  if (nodes[h].sediment_capa_sedi!=0) {
+	    nodes[h].rel_sedi=(nodes[h].upstream_erosion/(nodes[h].sediment_capa_sedi));
+	  }
+	  else {
+	    nodes[h].rel_sedi=1;
+	  }
+			
+	  if (nodes[h].under_taucrit==1) {nodes[h].diff=nodes[h].moved_sediment;}
+			
+	  //nodes[h].sediment_thickness=nodes[h].topsedi-nodes[h].bed;
+	}
+    }
+  //exit(1);
+}
+/*topsedi new is used everywhere in this function as we are now starting after the point where the incision has happened*/
+
+
+
+void update_height_noheightchange(nodetype *nodes,long *stack,long nx,long ny,long npits,double dx,double dy,long *stack2,double it_crit,double under_relax_height,long *flist,long s_flist,model_parameters *parameters)
+{
+  //This function handles the update of height in the case that the height of the bedrock should not be moved.
+  long i; //Parameter used in for loops
+  long j; //The stack number
+  double new; //The old and the new values used in the heigth iteration
+  double sediment_capa;
+  //double counter=0;
+  double in_stacks=0;
+  //double taeller=0;
+  double ero;
+  double split=parameters[0].split;
+	
+#pragma omp parallel for default(none) private(i,sediment_capa,new,j,ero) shared(nodes,nx,ny,dx,dy,in_stacks,stack,under_relax_height,parameters,split) schedule(static) //if((nx*ny)>(100*100))
+  for (i=0;i<nx*ny;i++)
+    {
+      j=stack[i];
+      if (j!=nodes[j].r && nodes[j].in_stack==1 && nodes[j].under_taucrit==0) //If it is in the stack and is not a baselevel or pit node
+	{	
+	  in_stacks++;
+	  sediment_capa=nodes[j].sediment_capa_sedi;
+			
+	  new=nodes[j].topsedi;
+						
+	  if (nodes[j].upstream_erosion<sediment_capa)
+	    {
+	      new=nodes[j].topsedi-(1-split)*expli_salt_abr(nodes,j,nodes[j].topsedi,parameters)-split*expli_stream_power(nodes,j,nodes[j].topsedi,parameters);
+	      nodes[j].stream_power=split*expli_stream_power(nodes,j,nodes[j].topsedi,parameters);
+	      nodes[j].saltabr_incision=(1-split)*expli_salt_abr(nodes,j,nodes[j].topsedi,parameters);
+	    }
+	  if (new<nodes[nodes[j].r].topsedi)
+	    {
+	      printf("Inversion of terrain streampower: topsedi %g new %g re %g \n",nodes[j].topsedi,new,nodes[nodes[j].r].topsedi);
+	      new=nodes[nodes[j].r].topsedi+1e8;
+	    }
+			
+	  new=under_relax_height*new+(1-under_relax_height)*nodes[j].topsedi;
+		
+	  ero=nodes[j].topsedi-new;
+	  if ((nodes[j].bed-ero)<nodes[nodes[j].r].topsedi) {ero=nodes[j].bed-nodes[nodes[j].r].topsedi;}
+	  if (nodes[j].bed-ero<0) {ero=nodes[j].bed-1e-15; printf("er det her overhovedet? \n");} //The factor 1e-15 is deducted to avoid that we can create a pit
+	  if (ero<0) {ero=0;}
+	  //nodes[j].bed=nodes[j].bed-ero;
+	  //nodes[j].topsedi=nodes[j].topsedi-ero;
+	  nodes[j].erosion=ero*dx*dy/parameters[0].deltat;
+	  if (nodes[j].erosion<0) {printf("Negative erosion: %2.8f \n",nodes[j].erosion); printf("node %ld new: %2.2f upper %2.2f, lower: %2.2f \n",j,new,nodes[j].topsedi,nodes[nodes[j].r].topsedi);}
+	  //if (nodes[j].erosion>0) {printf("Positive erosion: %2.8f \n",nodes[j].erosion); printf("node %ld new: %2.2f upper %2.2f, lower: %2.2f \n",j,new,nodes[j].topsedi,nodes[nodes[j].r].topsedi);}		
+			
+			
+
+			
+	}
+    }
+}
+
+
+
+
+void expli_solver_noheightchange(nodetype *nodes,long *stack,long nx,long ny,long npits,double dx,double dy,long *stack2,long *flist,long s_flist,model_parameters *parameters)
+{
+  //This function handles the solving when the height of the bedrock should not be moved.
+  double under_relax_sed=1; //A underrelaxtion parameter used to to ensure convergence
+  double under_relax_height=1;
+  double it_crit=1e-3; //The convergence criterion in the heigth iteration
+  long counter=0;
+  double sed_diff;
+  double small_number=0; //Used to avoid dividing by zero
+  long i;
+  double new_sed=INT_MAX;
+  double old_sed;
+	
+#pragma omp parallel for default(none) private(i) shared(nx,ny,nodes,parameters) //if((nx*ny)>(100*100))
+  for (i=0;i<nx*ny;i++)
+    {
+
+      nodes[i].fluv=0;
+      nodes[i].diff=0;
+      nodes[i].fluv_over_diff=0;
+      nodes[i].rel_sedi=0;
+      nodes[i].stream_power=0;
+      nodes[i].channel_width=channel_width_calc(nodes,i,parameters);
+      nodes[i].moved_sediment=0;
+      nodes[i].saltabr_incision=0;
+      nodes[i].under_taucrit=0;
+      nodes[i].river=0;
+    }
+	
+  // #pragma omp parallel for default(none) private(j) shared(nx,ny,nodes,parameters,dx,dy) //if((nx*ny)>(100*100))
+  // 	for (j=0;j<nx*ny;j++)
+  // 	{
+  // 		if (nodes[j].in_stack==1 && nodes[j].b!=1)
+  // 		{
+  // 			nodes[j].sediment_capa_sedi=expli_sed_cap_topsed(nodes,j,parameters,dx,dy);
+  // 		}
+  // 	}
+	
+	
+  expli_sed_cap_topsed_new(nodes,stack2,nx,ny,parameters,dx,dy);
+		
+
+	
+  //update_height(nodes,stack,nx,ny,npits,dx,dy,stack2,it_crit,under_relax_height,flist,s_flist,parameters);
+  //expli_update_sed(nodes,stack,nx,ny,dx,dy,stack2,under_relax_sed,parameters);
+
+
+
+  new_sed=expli_update_sed(nodes,stack,nx,ny,dx,dy,stack2,under_relax_sed,parameters);
+  sed_diff=INT_MAX;
+  do
+    {
+      if (parameters[0].split!=1)
+	{	
+	  old_sed=new_sed;
+	  update_height_noheightchange(nodes,stack,nx,ny,npits,dx,dy,stack2,it_crit,under_relax_height,flist,s_flist,parameters);
+	  new_sed=expli_update_sed(nodes,stack,nx,ny,dx,dy,stack2,under_relax_sed,parameters);
+	  sed_diff=fabs((new_sed-old_sed)/(new_sed+small_number));
+	  //if ((counter%50)==0 && counter!=0 && (it_crit*0.1*under_relax_sed/**under_relax_height*0.1*/)>2.2e-16) {under_relax_sed=under_relax_sed*0.1; /*under_relax_height*=0.1;*/}
+	  if ((counter%10)==0 && counter!=0 && (it_crit*0.5*under_relax_sed/**under_relax_height*0.1*/)>2.2e-16) {under_relax_sed=under_relax_sed*0.5; /*under_relax_height*=0.1;*/}
+	  if ((counter%20)==0 && counter!=0) {printf("counter: %ld, sed_diff: %2.5e \n",counter, sed_diff);}
+	  //if (counter%10==0  && counter!=0) {for (i=0;i<nx*ny;i++) {nodes[i].upstream_erosion+=0.001;}}
+	  if (counter>155) {sed_diff=0; printf("husk her \n");}	
+	  counter++;
+	}
+      else 
+	{
+	  old_sed=new_sed;
+	  update_height_noheightchange(nodes,stack,nx,ny,npits,dx,dy,stack2,it_crit,under_relax_height,flist,s_flist,parameters);
+	  new_sed=expli_update_sed(nodes,stack,nx,ny,dx,dy,stack2,under_relax_sed,parameters);
+	  sed_diff=fabs((new_sed-old_sed)/(new_sed+small_number));
+	  //sed_diff=0;
+	  if ((counter%4)==0 && counter!=0 && (it_crit*0.5*under_relax_sed/**under_relax_height*0.1*/)>2.2e-16) {under_relax_sed=under_relax_sed*0.5; /*under_relax_height*=0.1;*/}
+	  if ((counter%20)==0 && counter!=0) {printf("counter: %ld, sed_diff: %2.5e \n",counter, sed_diff);}
+	  //if (counter%10==0  && counter!=0) {for (i=0;i<nx*ny;i++) {nodes[i].upstream_erosion+=0.001;}}
+	  if (counter>205) {sed_diff=0; printf("husk her \n");}	
+	  counter++;
+	}
+    }
+  while (sed_diff>(it_crit*under_relax_sed*under_relax_height));
+	
+  sediment_transport_noeheightchange(nodes,stack,nx,ny,dx,dy,stack2,npits,parameters); //This one always uses the new topsedi values
+
+  //save_parameters(nodes,nx,ny,parameters);
+
+
+	
+#pragma omp parallel for default(none) private(i) shared(nx,ny,nodes) //if((nx*ny)>(100*100))
+  for (i=0;i<nx*ny;i++) {
+    nodes[i].sediment_thickness=nodes[i].topsedi-nodes[i].bed;
+    //if(nodes[i].sediment_thickness>0.05) printf("Sediment thickness %g fluvial deposition %g \n",nodes[i].sediment_thickness,nodes[i].fluvial_deposition);
+    //nodes[i].topsedi=nodes[i].topsedi+nodes[i].sediment_thickness;
+    nodes[i].fluv_over_diff=nodes[i].fluv/(nodes[i].diff+1e-18);
+    if (nodes[i].in_stack==1)
+      {
+	nodes[nodes[i].c].catchment_sediment+=nodes[i].sediment_thickness;
+	nodes[nodes[i].c].catchment_erosion+=nodes[i].erosion;
+	nodes[nodes[i].c].catchment_streampower+=nodes[i].stream_power;
+	nodes[nodes[i].c].catchment_saltabr+=nodes[i].saltabr_incision;
+	nodes[0].total_sediment+=nodes[i].sediment_thickness;
+	nodes[0].total_erosion+=nodes[i].erosion;
+	nodes[0].total_streampower+=nodes[i].stream_power;
+	nodes[0].total_saltabr+=nodes[i].saltabr_incision;
+      }
+  }
+	
+	
+	
+	
+}
+
+
+void noheightchange_controller(nodetype *nodes,meshtype mesh,char *path,char file[200],FILE *fp,double *step,double print_modulo,double number_of_outputs,char *output_path,double h,double n_step,model_parameters *parameters,double *output_number,long *counter,long *stack,long *stack2,long *pit_list,long *flist,long *baselevel_list,long n_baselevelnodes,long s_flist)
+{
+  long nx=parameters[0].nx;
+  long ny=parameters[0].ny;
+  long i;
+  long unsigned npits;
+  double dx=parameters[0].dx;
+  double dy=parameters[0].dy;
+  double deltat=parameters[0].deltat;
+	
+  weathering_noheightchange(nodes,nx,ny,parameters); //Performing weathering
+  for (i=0;i<nx*ny;i++)
+    {
+      nodes[i].top_old=nodes[i].topsedi;
+    }
+	
+	
+  get_reciever_wo_slope(nodes,nx,ny); //Getting the reciever of the node
+  npits=n_pits(nodes,nx,ny); //Finds the number of pits
+  if (npits>0) {
+    pit_lister(nodes,nx,ny,pit_list);
+  }	
+
+  if (fmod((*counter),50)==0) {printf("iteration: %2.0f total %2.0f n_landslides %d \n",h,n_step,0); printf("n_pits: %lu \n",npits);} //Outputs the iteration number and total number of landslides to the terminal
+  for (i=0;i<nx*ny;i++) {stack[i]=-1;} //Initializing the stack to -1, so that we can find which nodes are not in the stack
+  get_donorlist(nodes,nx,ny,stack,dx,dy,stack2,flist,baselevel_list,n_baselevelnodes,npits,pit_list); //Finds the stack, using the recursive algorithm from the Braun 2013 article
+
+
+  expli_solver_noheightchange(nodes,stack,nx,ny,npits,dx,dy,stack2,flist,s_flist,parameters);
+
+  smooth_erosion_handler(nodes,nx,ny);
+  (*step)+=deltat; //Advances the time
+  (*counter)++; //Advances the counter
+	
+  //printf("step %g counter %ld h %g \n",(*step),(*counter),h);
+	
+#pragma omp parallel
+  {
+#pragma omp single nowait
+    { 
+      if (floor(fmod((*counter),parameters[0].flux_out_modulo))==0) { flux_out(nodes,mesh,path,file,fp,(*step),output_path,parameters); }
+      //printf ("1 id = %d, h=%g \n", omp_get_thread_num(),h);
+    }
+
+#pragma omp single nowait
+    { 
+      //printf ("2 id = %d, \n", omp_get_thread_num());
+      if (floor(fmod((*counter),parameters[0].print_modulo))==0 /*step%(deltat*print_modulo)==0*/)
+	{
+	  (*output_number)=write_output(nodes,mesh,path,file,fp,(*step),print_modulo,number_of_outputs,npits,output_path,0,parameters,(*output_number)); //Writes the output number_of_inputs time. The 0 is the amount of landslides since last.
+	}
+				
+    }		 
+
+#pragma omp single nowait
+    {
+      if (floor(fmod((*counter),parameters[0].weath_out_modulo))==0) {weath_out(nodes,mesh,path,file,fp,(*step),output_path,parameters);}
+      // /printf ("3 id = %d, \n", omp_get_thread_num());
+				
+    }
+			
+  } //Ends the parallel section
+  //printf("\n\n");
+
+
+}

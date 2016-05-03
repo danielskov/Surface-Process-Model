@@ -1,0 +1,36 @@
+#include "header.h"
+
+void output(nodetype *nodes,meshtype mesh,char *path,char file[200],FILE *fp,double step,double print_modulo,double number_of_outputs, long pits,char *output_path,long landslides_since_last,model_parameters *parameters,double output_number,long counter,long flux_out_modulo,long *num_landslides)
+{
+
+  //#pragma omp parallel
+  {
+    //#pragma omp single nowait
+    { 
+      if (floor(fmod(counter,flux_out_modulo)==0)) {flux_out(nodes,mesh,path,file,fp,step,output_path,parameters); }
+      //printf ("1 id = %d, h=%g \n", omp_get_thread_num(),h);
+				
+    }
+
+    //#pragma omp single nowait
+    { 
+      //printf ("2 id = %d, \n", omp_get_thread_num());
+      if (floor(fmod(counter,print_modulo)==0) /*step%(deltat*print_modulo)==0*/) 
+	{
+	  landslides_since_last=num_landslides-old_n_landslides;
+	  //printf("numlandslides %ld landslides_since_last %ld old_landslides %ld \n",num_landslides,landslides_since_last,old_n_landslides);
+	  old_n_landslides=num_landslides;
+	  output_number=write_output(nodes,mesh,path,file,fp,step,print_modulo,number_of_outputs,npits,output_path,landslides_since_last,parameters,output_number); //Writes the output number_of_inputs time
+	  //printf("Output number %g step %g \n",output_number,step);
+	}
+    }		 
+
+    //#pragma omp single
+    {
+      //printf ("3 id = %d, \n", omp_get_thread_num());
+      if (floor(fmod(counter,weath_out_modulo)==0)) {weath_out(nodes,mesh,path,file,fp,step,output_path,parameters);}
+    }
+  } //Ends the parallel section
+  //printf("\n");
+}	
+}

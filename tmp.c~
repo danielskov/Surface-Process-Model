@@ -1,0 +1,92 @@
+
+
+
+
+double expli_update_sed(nodetype *nodes,long *stack,long nx,long ny,double dx,double dy,long *stack2,double under_relax_sed,model_parameters *parameters)
+{		
+  long i;
+  long h; //The current position in the inversed stack, that is stack2
+  double new_sed=0;
+  double lower_boundary;
+  double new_sediment=0;
+	
+#pragma omp parallel for default(none) shared(nodes,nx,ny) private(i) //if((nx*ny)>(100*100))
+  for (i=0;i<nx*ny;i++) {
+    nodes[i].upstream_erosion_old=nodes[i].upstream_erosion;
+    nodes[i].upstream_erosion=nodes[i].erosion;
+  }
+  //#pragma omp parallel for default(none) shared(nodes,nx,ny) private(i) //if((nx*ny)>(100*100))
+  for (i=0;i<nx*ny;i++) //Looping through the nodes
+    {
+		
+      h=stack2[i]; //We are using stack 2, as we are summing up the sediment from the top of the hills all the way to the baselevel nodes.
+		
+      if (nodes[h].r!=h && nodes[h].in_stack==1 && nodes[h].b!=1 && nodes[h].c>=0) //Only nodes that are in the stack and are not pits or baselevel nodes are looped
+	{
+	  if ((nodes[h].topsedi+parameters[0].deltat*(nodes[h].upstream_erosion-nodes[h].sediment_capa_sedi)/(dx*dy))>nodes[h].bed && 
+	      (nodes[h].topsedi+parameters[0].deltat*(nodes[h].upstream_erosion-nodes[h].sediment_capa_sedi)/(dx*dy))>nodes[nodes[h].r].topsedi) //If the erosion or deposition doesn't lower the top of the sediment below the top of the bedrock
+	    {		
+	      if (nodes[h].upstream_erosion<nodes[h].sediment_capa_sedi) //Picking up sediment
+		{
+		  //					nodes[h].topsedi=nodes[h].topsedi+parameters[0].deltat*(nodes[h].upstream_erosion-nodes[h].sediment_capa_sedi)/(dx*dy);
+		  //nodes[h].upstream_erosion=nodes[h].sediment_capa_sedi;
+		  new_sediment=nodes[h].sediment_capa_sedi;
+		}
+	      else { /*This is where the deposition is in the transport_sediment function*/
+		//nodes[h].upstream_erosion=nodes[h].sediment_capa_sedi;
+					
+		switch (parameters[0].do_fluvial_deposition)
+		  {
+		  case 'y':
+		    new_sediment=nodes[h].sediment_capa_sedi;
+		    break;
+		  case 'n':
+		    if (nodes[h].river==1) {
+		      new_sediment=nodes[h].upstream_erosion;
+		    }
+		    else {
+		      new_sediment=nodes[h].sediment_capa_sedi;
+		    }
+		    break;
+		  }
+		if (nodes[h].upstream_erosion<0) {nodes[h].upstream_erosion=0; new_sediment=0;}
+	      }
+	    }
+	  else if ((nodes[h].topsedi+parameters[0].deltat*(nodes[h].upstream_erosion-nodes[h].sediment_capa_sedi)/(dx*dy))<=nodes[h].bed ||
+		   (nodes[h].topsedi+parameters[0].deltat*(nodes[h].upstream_erosion-nodes[h].sediment_capa_sedi)/(dx*dy))<=nodes[nodes[h].r].topsedi) //Used when the erosion will remove all sediment in the node
+	    {
+	      if (nodes[h].bed<nodes[nodes[h].r].topsedi)
+		{
+		  if (nodes[h].bed<nodes[nodes[h].r].topsedi) {
+		    lower_boundary=nodes[nodes[h].r].topsedi+1e-1; } 
+		  if (lower_boundary>nodes[h].topsedi) {
+		    lower_boundary=nodes[nodes[h].r].topsedi+1e-2;} 
+		  if (lower_boundary>nodes[h].topsedi) {
+		    lower_boundary=(nodes[nodes[h].r].topsedi+nodes[h].topsedi)/2;  /*printf("her\n");*/}
+		}
+	      else {lower_boundary=nodes[h].bed;}
+	      //nodes[h].upstream_erosion=nodes[h].upstream_erosion+(nodes[h].topsedi-lower_boundary)*dx*dy/parameters[0].deltat;
+	      new_sediment=nodes[h].upstream_erosion+(nodes[h].topsedi-lower_boundary)*dx*dy/parameters[0].deltat;
+	      //				nodes[h].topsedi=lower_boundary;
+	    }
+	  else
+	    {
+	      new_sediment=0;
+	      printf("MAYOR ALERT \n");
+	      exit(1);
+	    }
+			
+	  nodes[h].upstream_erosion=under_relax_sed*new_sediment+(1-under_relax_sed)*nodes[h].upstream_erosion_old;
+						
+	  if (nodes[h].upstream_erosion<0) {nodes[h].upstream_erosion=0;}
+
+	  nodes[nodes[h].r].upstream_erosion=nodes[nodes[h].r].upstream_erosion+nodes[h].upstream_erosion;
+	}
+    }
+	
+#pragma omp parallel for default(none) shared(nx,ny,nodes) private(i) reduction(+:new_sed)	
+  for (i=0;i<nx*ny;i++) {new_sed+=fabs(nodes[i].upstream_erosion);}
+  new_sed*=parameters[0].deltat/dx*dy;
+  return new_sed;
+
+}

@@ -1,0 +1,7 @@
+%save('split0_hi.mat','mean_weath_list0','mean_erosion_list0')
+%save('split01_hi.mat','mean_weath_list01','mean_erosion_list01')
+%save('split03_hi.mat','mean_weath_list03','mean_erosion_list03')
+%save('split05_hi.mat','mean_weath_list05','mean_erosion_list05')
+save('split07_hi.mat','mean_weath_list07','mean_erosion_list07')
+%save('split09_hi.mat','mean_weath_list09','mean_erosion_list09')
+%save('split10_hi.mat','mean_weath_list10','mean_erosion_list10')

@@ -1,0 +1,132 @@
+\documentclass[a4paper,12pt,oneside,article,]{memoir}
+	\linespread{1.5}
+	\setlrmarginsandblock{25mm}{25mm}{*} %Her kan margin afstande ændres.
+		\setulmarginsandblock{25mm}{25mm}{*} %Her kan margin afstande ændres.
+		\setheadfoot{12.5mm}{12.5mm} %Her kan margin afstande ændres.
+		\checkandfixthelayout[nearest]
+\usepackage{mathtools}
+\usepackage[round,sort,comma]{natbib}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage[danish, english]{babel}
+\usepackage{graphicx}
+\usepackage{wrapfig}
+\graphicspath{ {./Figurer/} }
+\usepackage{subfig}
+\usepackage[margin=1cm,labelfont=bf,font=small]{caption} %Gør at marginen på billederne er mindre end ved teksten, og at figur nummeret bliver fed
+%\usepackage{subcaption} %Gør så jeg kan lave subcations når jeg har subfigures
+\usepackage{epstopdf} %Gør at jeg kan indsætte eps billeder
+\usepackage{pdfpages} %Gør at man kan indsætte pdfsider
+\usepackage{subfig} %Gør at man kan indsætte subfloats i figurer
+\usepackage{blindtext}
+
+
+\begin{document}
+\author{Daniel Søndergaard Skov}
+\title{Surface Process Model \\ Manual}
+\maketitle
+	\thispagestyle{empty}
+	\clearpage
+	\setcounter{page}{1}
+
+	\frontmatter
+	\tableofcontents
+	\mainmatter
+	
+
+\chapter{Introduction}
+This surface process model is developed to simulate long term landscape evolution. To do this it simulates surface processes in a landscape. These processes include fluvial erosion, fluvial deposition, weathering, uplift, landslides and other hillslope processes (diffusive processes such as rainsplash motion). The numerical model is written in C, with input and output files written in Matlab. 
+The code is parallized using openMP.
+
+\section{Files that need to be in the directory}
+\begin{itemize}
+\item
+global\_prop.h. This is a header file that defines global properties.
+header.h. This is a header file that is included in all .c files. This makes sure that all function can be called from all .c files. It also defines the structures that is used in the model, and which parameters these contain.
+\item
+functions.c. This file contains several different functions that is used in the model. Among other in contains the model for defining baselevelnodes, neighbours, distances between neighbours, downstream reciever of water, the formation of the drainage network, the weathering function and the uplift function.
+inout.c. This file contains the in-out functions that is used in the model.
+\item
+landslices.c. This file contains the files that are used in in the generation and deposition of landslides. 
+\item
+main.c. This file is the main file in the model, and is the file that starts and ends everything.
+\item
+solver.c. This file contains the function that enables the solving of the differential equation that governs the landscape evolution by fluvial incision, diffusive processes and deposition
+output folder. This folder will contain the outputs from the model.
+\item
+starting\_models folder. This folder contains the files that the makeinput.m file can use for generating an initial landscape.
+\item
+karman2d.m. This file is necessary to generate the fractal noise that is used in the generation of new starting models.
+\item
+makeinput.m. This file generates an initial landscape.
+\item
+read\_output.m. This file can read the output from the model.
+\item
+last\_file.sh. This shell file finds the lastly modified file in a folder.
+\item
+Makefile. This makefile defines how the model is compiled.
+\end{itemize}
+
+\chapter{Use of the model}
+\section{Defining initial landscape}
+The initial landscape that is evolved by the model needs to be defined. This initial landscape is defined using the file makeinput.m. This function has the option to either generate an entire new landscape, or it can take input from another file as the initial landscape.
+\subsection{Initial landscape with fractal noise}
+To generate a new landscape the parameter new\_start must be set to 'yes'. This will generate a new landscape. This new landscape will have two matrices containing parameters; bed and topsedi. The bed parameter defines the elevation of the bedrock, while the topsedi parameter defines the top of the sediment. The values are assigned using a fractal noise generator, as these type of models have shown to evolve into realistic looking landscapes. The landscape is then tilted, to allow faster evolution of the drainage network when the model is solved. All values in the matrices are forced to be above zero, as a value of zero would imply that the node is a baselevel node. The nodes that are chosen to be baselevel nodes are then forced to have a elevation of zero.
+\subsection{Starting from an existing file}
+If it is chosen to start from an existing file, the parameter new\_start must be set to 'no'. In doing so one also has to define the filename of the file that should be loaded. This is done by setting the parameter 'starting\_model\_name' to the name of the desired starting model. The starting model to be read must have the format of:
+nx with size long (int64).
+ny with size long (int64).
+dx with size double.
+dy with size double.
+4 characters with size double.
+1 charecter with size long.
+nx*ny characters with size double containing the elevation to the bedrock.
+nx*ny characters with size double containing the elevation to the top of the sediment.
+All values in the bedrock and top sediment matrices are then 
+
+A test file with txt format is provided in the folder, to show the desired format.
+
+The function outputs a file named meshdata.input, which is a binary file that can be read by the surface process model. 
+
+\subsection{Ideas for improvement}
+In succeeding models the initial landscape will be allowed to be defined on a non-regular grid. 
+
+\section{Defining parameters}
+A range of parameters need to be defined. These parameters include the length of the timestep, various constants in incision and diffusion equations and the number of landslides that can maximally occur per year.
+The parameters are defined in the function "initialize_parameters", which is the topmost function in the inout.c file. The parameters are stored in the parameters structure.
+
+Typical parameter ranges are as follows:
+U=0-8e-3; Uplift, in m/year
+K_stream=1e-5-2e-4; The fluvial erosion constant for stream power erosion.
+m/n=1; The m/n ratio should be in the range of 2/3-2.
+n_diff=1; diffusion exponent
+deltat=0.1-25; The time step, in years
+K_s=5e-5; Constant that scales the saltation abrasion incision.
+K_t=3e-5; Constant related to the maximum sediment load
+k_w=8e-4; Constant related to the width of a channel
+k_diff=1.5e-2; //diffusion constant used without sediment
+split=0; //The split between Saltation-Abrasion and Stream-Power models. 1=full stream power. 0=full saltation abrasion
+bare_rock_weath=1e-5; //The weathering rate on bare bedrock
+max_weath=3e-5; //The maximum weathering rate
+R_star=1; //The sediment thickness that corresponds to maximum weathering
+R_scale=1; //Scaling factor used in calculating the weathering rate
+porosity=0; //The porosity of the weathered layer on top the bedrock
+sedimentation_angle=0.01; //This is the angle that sediment will be sedimented with at a minimum. The angle is in [meters/meter]
+landslide_angle=0.05; //This is the angle that landslides will deposit with. Unit is [meters/meter]
+n_step=500000; //The number of steps that the model should run
+n_landslide_pa=0.4; //The number of landslides per year
+flux_out_modulo=200; //Determines how many timesteps there is between each addition to the flux out file
+do_fluvial_deposition='n'; //Determines whether rivers can deposit sediment or not
+do_landslide_deposition='y';  //Determines whether landslides will move sediment, or just free it as sediment but not move it
+landslide_type='b';  //Determines whether landslides will move sediment, or just free it as sediment but not move it
+uplift_type='b'; //Determines the type of uplift. The available types at the moment are uniform uplift, called by 'a', and a tilting uplift, called by 'b', sideways uplift by 'c', mix of sideways uplift and tilting uplift by 'd' and a mix of sideways uplift the other way and tilting uplift by 'e'.
+number_of_outputs=100;
+print_modulo=n_step/number_of_outputs;
+bisection_it_crit=1e-4;
+
+
+\backmatter
+\bibliography{mybib}
+\bibliographystyle{chicago}
+
+\end{document}
